@@ -29,25 +29,29 @@
                 <article class="pane" data-pane="gpt">
                     <header>ChatGPT</header>
                     <div class="pane-status" id="status-gpt">Idle</div>
-                    <pre class="pane-output" id="output-gpt">No response yet.</pre>
+                    <div class="pane-output empty" id="output-gpt">No responses yet.</div>
                 </article>
                 <article class="pane" data-pane="gem">
                     <header>Gemini</header>
                     <div class="pane-status" id="status-gem">Idle</div>
-                    <pre class="pane-output" id="output-gem">No response yet.</pre>
+                    <div class="pane-output empty" id="output-gem">No responses yet.</div>
                 </article>
                 <article class="pane" data-pane="perp">
                     <header>Perplexity</header>
                     <div class="pane-status" id="status-perp">Idle</div>
-                    <pre class="pane-output" id="output-perp">No response yet.</pre>
+                    <div class="pane-output empty" id="output-perp">No responses yet.</div>
                 </article>
             </section>
 
             <section class="composer">
-                <textarea id="promptInput" placeholder="@gpt tell me the weather tomorrow, @gem explain why the forecast changes, @perp summarize key risks"></textarea>
+                <div class="composer-input-wrap">
+                    <textarea id="promptInput" placeholder="@gpt tell me the weather tomorrow, @gem explain why the forecast changes, @perp summarize key risks"></textarea>
+                    <button id="dispatchBtn" title="Dispatch Prompt" aria-label="Dispatch Prompt">
+                        <span class="send-icon">↑</span>
+                    </button>
+                </div>
                 <div class="composer-row">
-                <div class="hint">Use @gpt, @gem, @perp, or @pplx. Messages route only to tabs already open for each provider.</div>
-                    <button id="dispatchBtn">Dispatch Prompt</button>
+                    <div class="hint">Use @gpt, @gem, @perp, or @pplx. Messages route only to tabs already open for each provider.</div>
                 </div>
                 <div id="globalStatus" class="global-status"></div>
             </section>

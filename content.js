@@ -8,6 +8,11 @@ if (pageProvider) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'AI_UINIFY_PING') {
+        sendResponse({ ok: true, provider: pageProvider || 'unknown' });
+        return false;
+    }
+
     if (message.type !== 'SEND_PROMPT') {
         return false;
     }
@@ -71,9 +76,9 @@ async function handlePromptInjection(payload, provider) {
     }
 
     const beforeSnapshot = getResponseSnapshot(provider);
-    const input = await waitForInput(provider, 10000);
+    const input = await waitForInput(provider, 15000);
     setInputText(input, prompt);
-    await delay(100);
+    await delay(120);
 
     const sent = clickSendButton(provider);
     if (!sent) {
@@ -83,8 +88,13 @@ async function handlePromptInjection(payload, provider) {
         }
     }
 
-    const output = await waitForNewResponse(provider, beforeSnapshot, 90000);
-    return { injected: true, provider, output };
+    const response = await waitForNewResponse(provider, beforeSnapshot, 120000);
+    return {
+        injected: true,
+        provider,
+        output: response.text,
+        outputHtml: response.html
+    };
 }
 
 function selectorsByProvider(provider) {
@@ -92,7 +102,7 @@ function selectorsByProvider(provider) {
         return {
             inputs: ['#prompt-textarea', 'textarea[data-id]', 'textarea'],
             sendButtons: ['button[data-testid="send-button"]', 'form button[type="submit"]', 'button[aria-label*="Send"]'],
-            responses: ['[data-message-author-role="assistant"]', 'article [data-message-author-role="assistant"]', '.markdown']
+            responses: ['[data-message-author-role="assistant"] .markdown', '[data-message-author-role="assistant"]', '.markdown']
         };
     }
     if (provider === 'gem') {
@@ -141,11 +151,13 @@ function setInputText(element, text) {
     if (element.tagName === 'TEXTAREA' || element.tagName === 'INPUT') {
         element.value = text;
         element.dispatchEvent(new Event('input', { bubbles: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true }));
         return;
     }
 
     if (element.isContentEditable) {
-        element.textContent = text;
+        element.textContent = '';
+        document.execCommand('insertText', false, text);
         element.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
         return;
     }
@@ -185,36 +197,27 @@ function triggerEnter(input) {
 }
 
 function getResponseSnapshot(provider) {
-    const selectors = selectorsByProvider(provider).responses;
-    const texts = [];
-    for (const selector of selectors) {
-        document.querySelectorAll(selector).forEach(node => {
-            const text = normalizeText(node.textContent || '');
-            if (text.length >= 20) {
-                texts.push(text);
-            }
-        });
-    }
-    return new Set(texts.slice(-8));
+    const candidates = collectResponseCandidates(provider);
+    return new Set(candidates.map(item => item.signature).slice(-12));
 }
 
 function waitForNewResponse(provider, beforeSnapshot, timeoutMs) {
     const started = Date.now();
-    let lastCandidate = '';
+    let lastCandidate = null;
     let stableCount = 0;
+
     return new Promise((resolve, reject) => {
         const tick = () => {
-            const candidate = findLatestResponseCandidate(provider);
-            const hasNew = candidate && !beforeSnapshot.has(candidate);
-            if (hasNew) {
-                if (candidate === lastCandidate) {
+            const candidate = findLatestResponseCandidate(provider, beforeSnapshot);
+            if (candidate) {
+                if (lastCandidate && lastCandidate.signature === candidate.signature) {
                     stableCount += 1;
                 } else {
                     lastCandidate = candidate;
                     stableCount = 1;
                 }
 
-                if (stableCount >= 3) {
+                if (stableCount >= 2) {
                     resolve(candidate);
                     return;
                 }
@@ -228,29 +231,55 @@ function waitForNewResponse(provider, beforeSnapshot, timeoutMs) {
                 reject(new Error('No provider response detected before timeout'));
                 return;
             }
+
             setTimeout(tick, 1000);
         };
+
         tick();
     });
 }
 
-function findLatestResponseCandidate(provider) {
+function findLatestResponseCandidate(provider, beforeSnapshot) {
+    const candidates = collectResponseCandidates(provider);
+    const fresh = candidates.filter(item => !beforeSnapshot.has(item.signature));
+    return fresh.at(-1) || null;
+}
+
+function collectResponseCandidates(provider) {
     const selectors = selectorsByProvider(provider).responses;
-    const candidates = [];
+    const results = [];
+
     for (const selector of selectors) {
         const nodes = Array.from(document.querySelectorAll(selector));
-        for (const node of nodes.slice(-6)) {
+        for (const node of nodes.slice(-8)) {
             const text = normalizeText(node.textContent || '');
-            if (text.length >= 20 && !/thinking|searching|drafting/i.test(text)) {
-                candidates.push(text);
+            if (text.length < 20 || /thinking|searching|drafting/i.test(text)) {
+                continue;
             }
+
+            const html = normalizeHtml(node.innerHTML || '');
+            const signature = `${text.slice(0, 260)}::${text.length}`;
+            results.push({ text, html, signature });
         }
     }
-    return candidates.at(-1) || '';
+
+    return dedupeBySignature(results);
+}
+
+function dedupeBySignature(items) {
+    const map = new Map();
+    for (const item of items) {
+        map.set(item.signature, item);
+    }
+    return Array.from(map.values());
 }
 
 function normalizeText(value) {
     return value.replace(/\s+/g, ' ').trim();
+}
+
+function normalizeHtml(value) {
+    return String(value || '').trim();
 }
 
 function delay(ms) {
