@@ -126,6 +126,9 @@ async function dispatchToProvider(chunk, conversationId) {
         };
     }
 
+    const activeContext = await getActiveTabContext();
+    await ensureTabReady(targetTab.id);
+
     emitActivity({
         type: 'dispatch.started',
         provider_alias: chunk.providerAlias,
@@ -137,7 +140,9 @@ async function dispatchToProvider(chunk, conversationId) {
     });
 
     try {
-        const response = await sendPromptToProviderTab(targetTab.id, chunk.prompt, provider.key);
+        const response = await sendPromptToProviderTab(targetTab.id, chunk.prompt, provider.key, {
+            forceFocus: true
+        });
 
         if (!response || !response.success) {
             throw new Error(response?.error || 'Provider script did not return success');
@@ -152,6 +157,7 @@ async function dispatchToProvider(chunk, conversationId) {
             timestamp: new Date().toISOString(),
             payload: {
                 output: response.result?.output || '',
+                output_html: response.result?.outputHtml || '',
                 tabId: targetTab.id,
                 tabUrl: targetTab.url || ''
             }
@@ -161,7 +167,8 @@ async function dispatchToProvider(chunk, conversationId) {
             provider_key: provider.key,
             provider_alias: chunk.providerAlias,
             status: 'completed',
-            output: response.result?.output || ''
+            output: response.result?.output || '',
+            output_html: response.result?.outputHtml || ''
         };
     } catch (error) {
         const message = error?.message || 'Failed to communicate with provider tab';
@@ -180,41 +187,168 @@ async function dispatchToProvider(chunk, conversationId) {
             status: 'failed',
             error: message
         };
+    } finally {
+        await restoreActiveTabContext(activeContext);
     }
 }
 
-async function sendPromptToProviderTab(tabId, prompt, providerKey) {
-    try {
-        return await chrome.tabs.sendMessage(tabId, {
-            type: 'SEND_PROMPT',
-            payload: { prompt, provider: providerKey }
-        });
-    } catch (error) {
-        const message = String(error?.message || '');
-        const missingReceiver = message.includes('Receiving end does not exist');
-        if (!missingReceiver) {
-            throw error;
-        }
+async function sendPromptToProviderTab(tabId, prompt, providerKey, options = {}) {
+    const payload = {
+        type: 'SEND_PROMPT',
+        payload: { prompt, provider: providerKey }
+    };
 
-        await chrome.scripting.executeScript({
-            target: { tabId },
-            files: ['content.js']
-        });
-
-        try {
-            await chrome.scripting.insertCSS({
-                target: { tabId },
-                files: ['content.css']
-            });
-        } catch (_) {
-            // Content CSS is optional for dispatch behavior.
-        }
-
-        return await chrome.tabs.sendMessage(tabId, {
-            type: 'SEND_PROMPT',
-            payload: { prompt, provider: providerKey }
-        });
+    if (options.forceFocus) {
+        await focusTab(tabId);
+        await delay(180);
     }
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+            await ensureContentScriptReady(tabId);
+            return await sendMessageWithTimeout(tabId, payload, 130000);
+        } catch (error) {
+            if (attempt === 3) {
+                throw error;
+            }
+            await delay(300 * attempt);
+        }
+    }
+}
+
+async function sendMessageWithTimeout(tabId, message, timeoutMs) {
+    const messagePromise = chrome.tabs.sendMessage(tabId, message);
+    const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Timed out waiting for provider tab response')), timeoutMs);
+    });
+    return Promise.race([messagePromise, timeoutPromise]);
+}
+
+async function getActiveTabContext() {
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab?.id) {
+        return null;
+    }
+    return {
+        tabId: activeTab.id,
+        windowId: activeTab.windowId
+    };
+}
+
+async function focusTab(tabId) {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.windowId) {
+        await chrome.windows.update(tab.windowId, { focused: true });
+    }
+    await chrome.tabs.update(tabId, { active: true });
+}
+
+async function restoreActiveTabContext(context) {
+    if (!context?.tabId) {
+        return;
+    }
+    try {
+        if (context.windowId) {
+            await chrome.windows.update(context.windowId, { focused: true });
+        }
+        await chrome.tabs.update(context.tabId, { active: true });
+    } catch (_) {
+        // Original tab may have been closed; ignore restore failures.
+    }
+}
+
+async function ensureTabReady(tabId) {
+    try {
+        await chrome.tabs.update(tabId, { autoDiscardable: false });
+    } catch (_) {
+        // Some Chrome versions may reject this property.
+    }
+
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.discarded) {
+        await chrome.tabs.reload(tabId);
+        await waitForTabComplete(tabId, 15000);
+    }
+}
+
+async function ensureContentScriptReady(tabId) {
+    try {
+        const ping = await chrome.tabs.sendMessage(tabId, { type: 'AI_UINIFY_PING' });
+        if (ping?.ok) {
+            return;
+        }
+    } catch (_) {
+        // Retry via script injection below.
+    }
+
+    await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['content.js']
+    });
+
+    try {
+        await chrome.scripting.insertCSS({
+            target: { tabId },
+            files: ['content.css']
+        });
+    } catch (_) {
+        // Content CSS is optional for dispatch behavior.
+    }
+
+    for (let i = 0; i < 5; i += 1) {
+        try {
+            const ping = await chrome.tabs.sendMessage(tabId, { type: 'AI_UINIFY_PING' });
+            if (ping?.ok) {
+                return;
+            }
+        } catch (_) {
+            // Wait and retry.
+        }
+        await delay(200);
+    }
+
+    throw new Error('Content script did not initialize in target tab');
+}
+
+function waitForTabComplete(tabId, timeoutMs) {
+    return new Promise((resolve, reject) => {
+        const startedAt = Date.now();
+        let finished = false;
+
+        const cleanup = () => {
+            finished = true;
+            chrome.tabs.onUpdated.removeListener(onUpdated);
+        };
+
+        const onUpdated = (updatedTabId, changeInfo) => {
+            if (updatedTabId !== tabId) {
+                return;
+            }
+            if (changeInfo.status === 'complete') {
+                cleanup();
+                resolve();
+            }
+        };
+
+        chrome.tabs.onUpdated.addListener(onUpdated);
+
+        const checkTimeout = () => {
+            if (finished) {
+                return;
+            }
+            if (Date.now() - startedAt > timeoutMs) {
+                cleanup();
+                reject(new Error('Timed out waiting for provider tab to load'));
+                return;
+            }
+            setTimeout(checkTimeout, 250);
+        };
+        checkTimeout();
+    });
+}
+
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function handleDispatch(payload) {
