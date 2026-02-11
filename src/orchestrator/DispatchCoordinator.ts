@@ -1,5 +1,6 @@
 import { MentionParser } from "./MentionParser";
 import { AdapterRegistry } from "./adapters";
+import { ComposedPromptPayload } from "./context";
 import {
   ActivityEvent,
   DispatchEnvelope,
@@ -129,8 +130,50 @@ export class DispatchCoordinator {
     return finalState;
   }
 
+  async dispatchWithContext(
+    promptWithMentions: string,
+    payload: ComposedPromptPayload,
+    conversationId = randomId(),
+  ): Promise<DispatchState> {
+    const contextualPrompt = this.renderContextualPrompt(promptWithMentions, payload);
+    return this.dispatch(contextualPrompt, conversationId);
+  }
+
   async recoverInFlightTasks(): Promise<DispatchState[]> {
     return this.store.listInFlight();
+  }
+
+  private renderContextualPrompt(
+    promptWithMentions: string,
+    payload: ComposedPromptPayload,
+  ): string {
+    const memoryBlock = payload.scopedMemory
+      .map((entry) => `- [${entry.scope}] ${entry.content}`)
+      .join("\n");
+
+    const taskCardBlock = [
+      `Task: ${payload.taskCard.title}`,
+      `Objective: ${payload.taskCard.objective}`,
+      `Acceptance criteria: ${payload.taskCard.acceptanceCriteria.join(" | ")}`,
+      payload.taskCard.constraints?.length
+        ? `Constraints: ${payload.taskCard.constraints.join(" | ")}`
+        : undefined,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return [
+      promptWithMentions,
+      "",
+      "[Task Card]",
+      taskCardBlock,
+      "",
+      "[Role Instruction]",
+      payload.roleInstruction,
+      "",
+      "[Scoped Memory]",
+      memoryBlock || "- none",
+    ].join("\n");
   }
 
   private async runWithRetry<T>(
