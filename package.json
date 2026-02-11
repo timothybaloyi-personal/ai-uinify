@@ -1,0 +1,25 @@
+{
+  "name": "ai-uinify",
+  "version": "1.0.0",
+  "description": "Chrome Extension to Unify AI UI Subscriptions",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "chrome-extension",
+    "ai",
+    "chatgpt",
+    "claude",
+    "gemini",
+    "perplexity"
+  ],
+  "author": "timothybaloyi-personal",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "typescript": "^5.3.3"
+  }
+}
