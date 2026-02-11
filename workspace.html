@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Uinify Workspace</title>
+    <link rel="stylesheet" href="workspace.css">
+</head>
+<body>
+    <div class="app">
+        <aside class="sidebar">
+            <div class="brand">AI Uinify</div>
+            <div class="sidebar-section">
+                <h2>Targets</h2>
+                <div class="provider-list">
+                    <button class="provider-link" data-provider="gpt">ChatGPT</button>
+                    <button class="provider-link" data-provider="gem">Gemini</button>
+                    <button class="provider-link" data-provider="perp">Perplexity</button>
+                </div>
+            </div>
+            <div class="sidebar-section">
+                <h2>Tasks / Activity</h2>
+                <div id="activityList" class="activity-list"></div>
+            </div>
+        </aside>
+
+        <main class="workspace-main">
+            <section class="panes">
+                <article class="pane" data-pane="gpt">
+                    <header>ChatGPT</header>
+                    <div class="pane-status" id="status-gpt">Idle</div>
+                    <pre class="pane-output" id="output-gpt">No response yet.</pre>
+                </article>
+                <article class="pane" data-pane="gem">
+                    <header>Gemini</header>
+                    <div class="pane-status" id="status-gem">Idle</div>
+                    <pre class="pane-output" id="output-gem">No response yet.</pre>
+                </article>
+                <article class="pane" data-pane="perp">
+                    <header>Perplexity</header>
+                    <div class="pane-status" id="status-perp">Idle</div>
+                    <pre class="pane-output" id="output-perp">No response yet.</pre>
+                </article>
+            </section>
+
+            <section class="composer">
+                <textarea id="promptInput" placeholder="@gpt tell me the weather tomorrow, @gem explain why the forecast changes, @perp summarize key risks"></textarea>
+                <div class="composer-row">
+                <div class="hint">Use @gpt, @gem, @perp, or @pplx. Messages route only to tabs already open for each provider.</div>
+                    <button id="dispatchBtn">Dispatch Prompt</button>
+                </div>
+                <div id="globalStatus" class="global-status"></div>
+            </section>
+        </main>
+    </div>
+
+    <script src="workspace.js"></script>
+</body>
+</html>

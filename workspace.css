@@ -1,0 +1,238 @@
+:root {
+    --bg: #d8edf7;
+    --panel: #f6fbff;
+    --ink: #111;
+    --line: #7dbfe2;
+    --brand: #163246;
+    --action: #4d97ff;
+    --muted: #5f6874;
+    --ok: #219653;
+    --warn: #d35400;
+    --bad: #c0392b;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+    color: var(--ink);
+    background: linear-gradient(160deg, #e6f5fc, #cfe8f4 55%, #d9f0fb);
+}
+
+.app {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    height: 100vh;
+    gap: 10px;
+    padding: 10px;
+}
+
+.sidebar {
+    border: 3px solid var(--line);
+    border-radius: 12px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.7);
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    gap: 10px;
+    min-height: 0;
+}
+
+.brand {
+    border: 2px solid var(--brand);
+    border-radius: 12px;
+    padding: 16px 14px;
+    font-size: 34px;
+    font-weight: 800;
+    line-height: 1;
+    background: #fff;
+}
+
+.sidebar-section {
+    border: 2px solid var(--brand);
+    border-radius: 12px;
+    padding: 10px;
+    background: #fff;
+}
+
+.sidebar-section h2 {
+    margin: 0 0 10px 0;
+    font-size: 18px;
+}
+
+.provider-list {
+    display: grid;
+    gap: 8px;
+}
+
+.provider-link {
+    border: 1px solid var(--line);
+    background: #f5fbff;
+    border-radius: 8px;
+    padding: 8px;
+    text-align: left;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.provider-link:hover {
+    background: #e5f4fc;
+}
+
+.activity-list {
+    display: grid;
+    gap: 8px;
+    max-height: 100%;
+    overflow: auto;
+}
+
+.activity-item {
+    border: 1px solid #cfdde7;
+    border-left: 5px solid #5aa3e1;
+    border-radius: 8px;
+    padding: 8px;
+    background: #f8fcff;
+    font-size: 14px;
+}
+
+.activity-item.completed {
+    border-left-color: var(--ok);
+}
+
+.activity-item.failed {
+    border-left-color: var(--bad);
+}
+
+.activity-time {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 4px;
+}
+
+.workspace-main {
+    border: 3px solid var(--line);
+    border-radius: 12px;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.65);
+    display: grid;
+    grid-template-rows: 1fr auto;
+    gap: 10px;
+    min-height: 0;
+}
+
+.panes {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    min-height: 0;
+}
+
+.pane {
+    border: 2px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    min-height: 0;
+}
+
+.pane header {
+    padding: 10px;
+    border-bottom: 1px solid #cddcea;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.pane-status {
+    padding: 8px 10px;
+    font-size: 13px;
+    color: var(--muted);
+    border-bottom: 1px solid #d9e8f3;
+}
+
+.pane-status.active {
+    color: var(--warn);
+}
+
+.pane-status.complete {
+    color: var(--ok);
+}
+
+.pane-status.error {
+    color: var(--bad);
+}
+
+.pane-output {
+    margin: 0;
+    padding: 10px;
+    white-space: pre-wrap;
+    overflow: auto;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.composer {
+    border: 2px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    padding: 8px;
+}
+
+.composer textarea {
+    width: 100%;
+    min-height: 96px;
+    resize: vertical;
+    border: 1px solid #7fb3d3;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 18px;
+}
+
+.composer-row {
+    margin-top: 8px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.hint {
+    flex: 1;
+    color: var(--muted);
+}
+
+#dispatchBtn {
+    border: none;
+    background: var(--action);
+    color: #fff;
+    border-radius: 8px;
+    padding: 10px 14px;
+    min-width: 190px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+#dispatchBtn:disabled {
+    background: #7b9fd0;
+    cursor: not-allowed;
+}
+
+.global-status {
+    min-height: 22px;
+    margin-top: 6px;
+    font-size: 14px;
+}
+
+@media (max-width: 1200px) {
+    .app {
+        grid-template-columns: 220px 1fr;
+    }
+
+    .panes {
+        grid-template-columns: 1fr;
+        grid-auto-rows: minmax(260px, 1fr);
+    }
+}
