@@ -74,7 +74,9 @@ function appendPaneResponse(provider, payload) {
     const body = document.createElement('div');
     body.className = 'response-body';
 
-    const html = payload?.output_html ? sanitizeHtml(payload.output_html) : '';
+    const html = payload?.output_html
+        ? sanitizeHtml(payload.output_html)
+        : renderMarkdownIfPresent(payload?.output || '');
     if (html) {
         body.innerHTML = html;
     } else {
@@ -149,6 +151,114 @@ function sanitizeHtml(unsafeHtml) {
     return template.innerHTML;
 }
 
+function renderMarkdownIfPresent(text) {
+    const source = String(text || '');
+    if (!source.trim()) {
+        return '';
+    }
+    if (!/[#*`\-\[\]]/.test(source)) {
+        return '';
+    }
+    return sanitizeHtml(markdownToHtml(source));
+}
+
+function markdownToHtml(source) {
+    const lines = source.replace(/\r\n/g, '\n').split('\n');
+    const html = [];
+    let inUl = false;
+    let inOl = false;
+
+    const closeLists = () => {
+        if (inUl) {
+            html.push('</ul>');
+            inUl = false;
+        }
+        if (inOl) {
+            html.push('</ol>');
+            inOl = false;
+        }
+    };
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+            closeLists();
+            continue;
+        }
+
+        const h3 = line.match(/^###\s+(.+)$/);
+        if (h3) {
+            closeLists();
+            html.push(`<h3>${applyInlineMarkdown(h3[1])}</h3>`);
+            continue;
+        }
+
+        const h2 = line.match(/^##\s+(.+)$/);
+        if (h2) {
+            closeLists();
+            html.push(`<h2>${applyInlineMarkdown(h2[1])}</h2>`);
+            continue;
+        }
+
+        const h1 = line.match(/^#\s+(.+)$/);
+        if (h1) {
+            closeLists();
+            html.push(`<h1>${applyInlineMarkdown(h1[1])}</h1>`);
+            continue;
+        }
+
+        const ul = line.match(/^[-*]\s+(.+)$/);
+        if (ul) {
+            if (inOl) {
+                html.push('</ol>');
+                inOl = false;
+            }
+            if (!inUl) {
+                html.push('<ul>');
+                inUl = true;
+            }
+            html.push(`<li>${applyInlineMarkdown(ul[1])}</li>`);
+            continue;
+        }
+
+        const ol = line.match(/^\d+\.\s+(.+)$/);
+        if (ol) {
+            if (inUl) {
+                html.push('</ul>');
+                inUl = false;
+            }
+            if (!inOl) {
+                html.push('<ol>');
+                inOl = true;
+            }
+            html.push(`<li>${applyInlineMarkdown(ol[1])}</li>`);
+            continue;
+        }
+
+        closeLists();
+        html.push(`<p>${applyInlineMarkdown(line)}</p>`);
+    }
+
+    closeLists();
+    return html.join('');
+}
+
+function applyInlineMarkdown(value) {
+    const escaped = escapeHtml(value);
+    return escaped
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
 async function dispatchPrompt() {
     const prompt = promptInput.value.trim();
     if (!prompt) {
@@ -172,11 +282,18 @@ async function dispatchPrompt() {
         });
         if (response.success) {
             const anySuccess = response.result.responses.some(item => item.status === 'completed');
-            setGlobalStatus(anySuccess ? 'Dispatch finished.' : 'Dispatch finished with errors.', anySuccess ? 'success' : 'error');
+            const anyInFlight = response.result.responses.some(item => item.status === 'in_flight');
+            if (anyInFlight) {
+                setGlobalStatus('Prompt sent. Waiting for provider responses...', 'info');
+            } else {
+                setGlobalStatus(anySuccess ? 'Dispatch finished.' : 'Dispatch finished with errors.', anySuccess ? 'success' : 'error');
+            }
             response.result.responses.forEach(item => {
                 const provider = item.provider_key;
                 if (item.status === 'completed') {
                     setPaneStatus(provider, 'Completed', 'complete');
+                } else if (item.status === 'in_flight') {
+                    setPaneStatus(provider, 'Sent, waiting for response...', 'active');
                 } else {
                     setPaneStatus(provider, item.error || 'Failed', 'error');
                 }
@@ -202,6 +319,9 @@ function applyActivityEvent(event) {
         if (event.type === 'dispatch.started') {
             setPaneStatus(provider, 'Sending to open tab...', 'active');
         }
+        if (event.type === 'dispatch.update') {
+            setPaneStatus(provider, event.payload?.note || 'Waiting for provider response...', 'active');
+        }
         if (event.type === 'dispatch.completed') {
             setPaneStatus(provider, 'Completed', 'complete');
             appendPaneResponse(provider, {
@@ -225,6 +345,8 @@ function prependActivity(event) {
         summary = `${label}: queued`;
     } else if (event.type === 'dispatch.started') {
         summary = `${label}: started`;
+    } else if (event.type === 'dispatch.update') {
+        summary = `${label}: waiting for response`;
     } else if (event.type === 'dispatch.completed') {
         summary = `${label}: completed`;
     } else {
@@ -253,14 +375,8 @@ function setDispatchWaiting(waiting) {
 }
 
 function openProviderTab(provider) {
-    const urlByProvider = {
-        gpt: 'https://chatgpt.com/',
-        gem: 'https://gemini.google.com/',
-        perp: 'https://www.perplexity.ai/'
-    };
-    const url = urlByProvider[provider];
-    if (!url) {
-        return;
-    }
-    chrome.tabs.create({ url });
+    chrome.runtime.sendMessage({
+        type: 'OPEN_PROVIDER_TAB',
+        provider
+    }).catch(() => {});
 }

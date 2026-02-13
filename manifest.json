@@ -9,14 +9,19 @@
   "permissions": [
     "storage",
     "tabs",
-    "scripting"
+    "scripting",
+    "tabGroups"
   ],
   "host_permissions": [
     "https://chat.openai.com/*",
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
+    "https://bard.google.com/*",
+    "https://content-push.googleapis.com/*",
     "https://www.perplexity.ai/*",
-    "https://perplexity.ai/*"
+    "https://perplexity.ai/*",
+    "https://labs-api.perplexity.ai/*",
+    "wss://labs-api.perplexity.ai/*"
   ],
   "background": {
     "service_worker": "background.js"
