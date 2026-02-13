@@ -2,6 +2,7 @@
 console.log('AI Uinify content script loaded on:', window.location.href);
 
 const pageProvider = detectProvider();
+const inFlightDispatches = new Set();
 if (pageProvider) {
     console.log(`AI Uinify: Detected provider - ${pageProvider}`);
     addExtensionIndicator();
@@ -26,10 +27,124 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return false;
     }
 
-    handlePromptInjection(message.payload, pageProvider)
-        .then(result => sendResponse({ success: true, result }))
+    const payload = message.payload || {};
+    const dispatchId = String(payload.dispatchId || '');
+    if (!dispatchId) {
+        sendResponse({ success: false, error: 'Missing dispatchId' });
+        return false;
+    }
+
+    if (inFlightDispatches.has(dispatchId)) {
+        sendResponse({ success: true, accepted: true, duplicate: true });
+        return false;
+    }
+
+    handlePromptSubmission(payload, pageProvider)
+        .then(async context => {
+            inFlightDispatches.add(dispatchId);
+            sendResponse({ success: true, accepted: true });
+            try {
+                const response = await waitForNewResponse(pageProvider, context.beforeSnapshot, 120000);
+                await chrome.runtime.sendMessage({
+                    type: 'PROVIDER_RESPONSE_EVENT',
+                    payload: {
+                        status: 'completed',
+                        dispatchId,
+                        conversationId: payload.conversationId || '',
+                        providerKey: pageProvider,
+                        providerAlias: payload.providerAlias || '',
+                        output: response.text,
+                        outputHtml: response.html
+                    }
+                });
+            } catch (error) {
+                await chrome.runtime.sendMessage({
+                    type: 'PROVIDER_RESPONSE_EVENT',
+                    payload: {
+                        status: 'failed',
+                        dispatchId,
+                        conversationId: payload.conversationId || '',
+                        providerKey: pageProvider,
+                        providerAlias: payload.providerAlias || '',
+                        error: error?.message || 'No provider response detected before timeout'
+                    }
+                });
+            } finally {
+                inFlightDispatches.delete(dispatchId);
+            }
+        })
         .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
+});
+
+chrome.runtime.onConnect.addListener((port) => {
+    port.onMessage.addListener(async (message) => {
+        if (message?.type !== 'PROXY_FETCH') {
+            return;
+        }
+
+        const abortController = new AbortController();
+        const disconnectHandler = () => abortController.abort();
+        port.onDisconnect.addListener(disconnectHandler);
+
+        try {
+            const response = await fetch(message.url, {
+                method: message.options?.method || 'GET',
+                headers: message.options?.headers || undefined,
+                body: message.options?.body || undefined,
+                signal: abortController.signal,
+                credentials: 'include'
+            });
+
+            port.postMessage({
+                type: 'PROXY_RESPONSE_METADATA',
+                metadata: {
+                    status: response.status,
+                    statusText: response.statusText,
+                    headers: Object.fromEntries(response.headers.entries())
+                }
+            });
+
+            if (!response.body) {
+                port.postMessage({ type: 'PROXY_RESPONSE_BODY_CHUNK', done: true });
+                return;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) {
+                    break;
+                }
+                if (value) {
+                    port.postMessage({
+                        type: 'PROXY_RESPONSE_BODY_CHUNK',
+                        done: false,
+                        value: decoder.decode(value, { stream: true })
+                    });
+                }
+            }
+
+            const tail = decoder.decode();
+            if (tail) {
+                port.postMessage({
+                    type: 'PROXY_RESPONSE_BODY_CHUNK',
+                    done: false,
+                    value: tail
+                });
+            }
+
+            port.postMessage({ type: 'PROXY_RESPONSE_BODY_CHUNK', done: true });
+        } catch (error) {
+            port.postMessage({
+                type: 'PROXY_RESPONSE_ERROR',
+                error: error?.message || 'Proxy fetch failed'
+            });
+        } finally {
+            port.onDisconnect.removeListener(disconnectHandler);
+        }
+    });
 });
 
 function detectProvider() {
@@ -69,7 +184,7 @@ function addExtensionIndicator() {
     setTimeout(() => indicator.remove(), 2200);
 }
 
-async function handlePromptInjection(payload, provider) {
+async function handlePromptSubmission(payload, provider) {
     const prompt = String(payload?.prompt || '').trim();
     if (!prompt) {
         throw new Error('Prompt is empty');
@@ -88,12 +203,10 @@ async function handlePromptInjection(payload, provider) {
         }
     }
 
-    const response = await waitForNewResponse(provider, beforeSnapshot, 120000);
     return {
-        injected: true,
+        accepted: true,
         provider,
-        output: response.text,
-        outputHtml: response.html
+        beforeSnapshot
     };
 }
 
